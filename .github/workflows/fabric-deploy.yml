@@ -24,21 +24,35 @@ jobs:
         shell: pwsh
         run: |
           $baseUrl = "https://api.fabric.microsoft.com/v1"
-          az login --service-principal --username $env:FABRIC_CLIENT_ID --password $env:FABRIC_CLIENT_SECRET --tenant $env:FABRIC_TENANT_ID | Out-Null
+
+          az login --service-principal --username $env:FABRIC_CLIENT_ID --password $env:FABRIC_CLIENT_SECRET --tenant $env:FABRIC_TENANT_ID --allow-no-subscriptions | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "az login failed!" -ForegroundColor Red
+              exit 1
+          }
+
           $token = az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv
           $fabricHeaders = @{ "Authorization" = "Bearer $token" }
 
           $pipelines = (Invoke-RestMethod -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines" -Method GET).value
           $pipeline = $pipelines | Where-Object { $_.displayName -eq "Sales Pipeline" }
+          if (-not $pipeline) {
+              Write-Host "Pipeline not found!" -ForegroundColor Red
+              exit 1
+          }
           $pipelineId = $pipeline.id
+          Write-Host "Found pipeline: $($pipeline.displayName) ($pipelineId)" -ForegroundColor Green
 
           $stages = (Invoke-RestMethod -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines/$pipelineId/stages" -Method GET).value
           $sourceStage = $stages | Where-Object { $_.displayName -eq "Development" }
           $targetStage = $stages | Where-Object { $_.displayName -eq "Test" }
 
           $deployBody = @{ sourceStageId = $sourceStage.id; targetStageId = $targetStage.id; note = "Auto deploy via GitHub Actions" } | ConvertTo-Json
+
+          Write-Host "Deploying from Development to Test..." -ForegroundColor Green
           $deployResponse = Invoke-WebRequest -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines/$pipelineId/deploy" -Method POST -Body $deployBody -ContentType "application/json"
           $operationId = $deployResponse.Headers["x-ms-operation-id"]
+          Write-Host "Operation ID: $operationId" -ForegroundColor Green
 
           do {
             Start-Sleep -Seconds 10
@@ -46,7 +60,12 @@ jobs:
             Write-Host "Status: $($operation.status)"
           } while ($operation.status -in @("NotStarted", "Running"))
 
-          if ($operation.status -ne "Succeeded") { exit 1 }
+          if ($operation.status -ne "Succeeded") {
+              Write-Host "Deployment failed:" -ForegroundColor Red
+              $operation | ConvertTo-Json -Depth 5
+              exit 1
+          }
+          Write-Host "Deployment succeeded!" -ForegroundColor Green
 
   deploy-test-to-prod:
     needs: deploy-dev-to-test
@@ -61,21 +80,35 @@ jobs:
         shell: pwsh
         run: |
           $baseUrl = "https://api.fabric.microsoft.com/v1"
-          az login --service-principal --username $env:FABRIC_CLIENT_ID --password $env:FABRIC_CLIENT_SECRET --tenant $env:FABRIC_TENANT_ID | Out-Null
+
+          az login --service-principal --username $env:FABRIC_CLIENT_ID --password $env:FABRIC_CLIENT_SECRET --tenant $env:FABRIC_TENANT_ID --allow-no-subscriptions | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "az login failed!" -ForegroundColor Red
+              exit 1
+          }
+
           $token = az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv
           $fabricHeaders = @{ "Authorization" = "Bearer $token" }
 
           $pipelines = (Invoke-RestMethod -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines" -Method GET).value
           $pipeline = $pipelines | Where-Object { $_.displayName -eq "Sales Pipeline" }
+          if (-not $pipeline) {
+              Write-Host "Pipeline not found!" -ForegroundColor Red
+              exit 1
+          }
           $pipelineId = $pipeline.id
+          Write-Host "Found pipeline: $($pipeline.displayName) ($pipelineId)" -ForegroundColor Green
 
           $stages = (Invoke-RestMethod -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines/$pipelineId/stages" -Method GET).value
           $sourceStage = $stages | Where-Object { $_.displayName -eq "Test" }
           $targetStage = $stages | Where-Object { $_.displayName -eq "Production" }
 
           $deployBody = @{ sourceStageId = $sourceStage.id; targetStageId = $targetStage.id; note = "Auto deploy via GitHub Actions" } | ConvertTo-Json
+
+          Write-Host "Deploying from Test to Production..." -ForegroundColor Green
           $deployResponse = Invoke-WebRequest -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines/$pipelineId/deploy" -Method POST -Body $deployBody -ContentType "application/json"
           $operationId = $deployResponse.Headers["x-ms-operation-id"]
+          Write-Host "Operation ID: $operationId" -ForegroundColor Green
 
           do {
             Start-Sleep -Seconds 10
@@ -83,4 +116,9 @@ jobs:
             Write-Host "Status: $($operation.status)"
           } while ($operation.status -in @("NotStarted", "Running"))
 
-          if ($operation.status -ne "Succeeded") { exit 1 }
+          if ($operation.status -ne "Succeeded") {
+              Write-Host "Deployment failed:" -ForegroundColor Red
+              $operation | ConvertTo-Json -Depth 5
+              exit 1
+          }
+          Write-Host "Deployment succeeded!" -ForegroundColor Green
