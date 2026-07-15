@@ -9,10 +9,17 @@ jobs:
   deploy-dev-to-test:
     runs-on: windows-latest
     env:
-      FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
-      FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
-      FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+      FABRIC_CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      FABRIC_TENANT_ID: ${{ secrets.TENANT_ID }}
+      FABRIC_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
     steps:
+      - name: Debug Check Secrets
+        shell: pwsh
+        run: |
+          Write-Host "Client ID length: $($env:FABRIC_CLIENT_ID.Length)"
+          Write-Host "Tenant ID length: $($env:FABRIC_TENANT_ID.Length)"
+          Write-Host "Secret length: $($env:FABRIC_CLIENT_SECRET.Length)"
+
       - name: Deploy Dev to Test
         shell: pwsh
         run: |
@@ -46,9 +53,9 @@ jobs:
     runs-on: windows-latest
     environment: Production
     env:
-      FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
-      FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
-      FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+      FABRIC_CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      FABRIC_TENANT_ID: ${{ secrets.TENANT_ID }}
+      FABRIC_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
     steps:
       - name: Deploy Test to Production
         shell: pwsh
