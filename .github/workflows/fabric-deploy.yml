@@ -1,0 +1,71 @@
+name: Fabric Dev to Prod Deployment
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * *'
+
+jobs:
+  deploy-dev-to-test:
+    runs-on: windows-latest
+    steps:
+      - name: Deploy Dev to Test
+        shell: pwsh
+        run: |
+          $baseUrl = "https://api.fabric.microsoft.com/v1"
+          az login --service-principal -u "${{ secrets.FABRIC_CLIENT_ID }}" -p "${{ secrets.FABRIC_CLIENT_SECRET }}" --tenant "${{ secrets.FABRIC_TENANT_ID }}" | Out-Null
+          $token = az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv
+          $fabricHeaders = @{ "Authorization" = "Bearer $token" }
+
+          $pipelines = (Invoke-RestMethod -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines" -Method GET).value
+          $pipeline = $pipelines | Where-Object { $_.displayName -eq "Sales Pipeline" }
+          $pipelineId = $pipeline.id
+
+          $stages = (Invoke-RestMethod -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines/$pipelineId/stages" -Method GET).value
+          $sourceStage = $stages | Where-Object { $_.displayName -eq "Development" }
+          $targetStage = $stages | Where-Object { $_.displayName -eq "Test" }
+
+          $deployBody = @{ sourceStageId = $sourceStage.id; targetStageId = $targetStage.id; note = "Auto deploy via GitHub Actions" } | ConvertTo-Json
+          $deployResponse = Invoke-WebRequest -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines/$pipelineId/deploy" -Method POST -Body $deployBody -ContentType "application/json"
+          $operationId = $deployResponse.Headers["x-ms-operation-id"]
+
+          do {
+            Start-Sleep -Seconds 10
+            $operation = Invoke-RestMethod -Headers $fabricHeaders -Uri "$baseUrl/operations/$operationId" -Method GET
+            Write-Host "Status: $($operation.status)"
+          } while ($operation.status -in @("NotStarted", "Running"))
+
+          if ($operation.status -ne "Succeeded") { exit 1 }
+
+  deploy-test-to-prod:
+    needs: deploy-dev-to-test
+    runs-on: windows-latest
+    environment: Production
+    steps:
+      - name: Deploy Test to Production
+        shell: pwsh
+        run: |
+          $baseUrl = "https://api.fabric.microsoft.com/v1"
+          az login --service-principal -u "${{ secrets.FABRIC_CLIENT_ID }}" -p "${{ secrets.FABRIC_CLIENT_SECRET }}" --tenant "${{ secrets.FABRIC_TENANT_ID }}" | Out-Null
+          $token = az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv
+          $fabricHeaders = @{ "Authorization" = "Bearer $token" }
+
+          $pipelines = (Invoke-RestMethod -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines" -Method GET).value
+          $pipeline = $pipelines | Where-Object { $_.displayName -eq "Sales Pipeline" }
+          $pipelineId = $pipeline.id
+
+          $stages = (Invoke-RestMethod -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines/$pipelineId/stages" -Method GET).value
+          $sourceStage = $stages | Where-Object { $_.displayName -eq "Test" }
+          $targetStage = $stages | Where-Object { $_.displayName -eq "Production" }
+
+          $deployBody = @{ sourceStageId = $sourceStage.id; targetStageId = $targetStage.id; note = "Auto deploy via GitHub Actions" } | ConvertTo-Json
+          $deployResponse = Invoke-WebRequest -Headers $fabricHeaders -Uri "$baseUrl/deploymentPipelines/$pipelineId/deploy" -Method POST -Body $deployBody -ContentType "application/json"
+          $operationId = $deployResponse.Headers["x-ms-operation-id"]
+
+          do {
+            Start-Sleep -Seconds 10
+            $operation = Invoke-RestMethod -Headers $fabricHeaders -Uri "$baseUrl/operations/$operationId" -Method GET
+            Write-Host "Status: $($operation.status)"
+          } while ($operation.status -in @("NotStarted", "Running"))
+
+          if ($operation.status -ne "Succeeded") { exit 1 }
